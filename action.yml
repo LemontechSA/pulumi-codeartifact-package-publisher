@@ -1,0 +1,119 @@
+name: 'Pulumi CodeArtifact Package publisher'
+description: 'A GitHub Action that publishes provider SDKs to CodeArtifact'
+inputs:
+  sdk:
+    description: |
+      The name of the language SDK being published.
+
+      To enable a single language, specify that language:
+
+          sdk: nodejs
+
+      To enable multiple languages, specify them:
+
+          sdk: nodejs,python
+
+      To enable all languages (the default), specify 'all':
+
+          sdk: all
+
+      To disable only a single language (but enable all others), use:
+
+          sdk: all,!nodejs
+
+    required: false
+    default: 'all'
+  aws_access_key_id:
+    description: 'AWS Access Key ID'
+    required: true
+  aws_secret_access_key:
+    description: 'AWS Secret Access Key'
+    required: true
+  codeartifact_repository:
+    description: 'AWS CodeArtifact Repository'
+    required: true
+  codeartifact_domain:
+    description: 'AWS CodeArtifact Domain'
+    required: true
+  codeartifact_domain_owner:
+    description: 'AWS CodeArtifact Domain Owner'
+    required: true
+  codeartifact_region:
+    description: 'AWS CodeArtifact Region'
+    required: true
+  artifact_name:
+    description: 'The name of the artifact to publish'
+    required: true
+
+# The if: statement for the above is:
+#
+# if: (contains(inputs.sdk, '${LANGUAGE}') || (contains(inputs.sdk, 'all') && !contains(inputs.sdk, '!all'))) && !contains(inputs.sdk, '!${LANGUAGE}')
+#
+# If can be read as:
+#
+#    If (${LANGUAGE} or all (but not !all)) and not !${LANGUAGE}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Verify input
+      run: echo 'Publishing SDK:' && echo ${{ inputs.sdk }}
+      shell: bash
+    - name: Checkout Repo
+      uses: actions/checkout@v3
+      with:
+        repository: ${{ github.repository }}
+    - name: Unshallow clone for tags
+      run: git fetch --prune --unshallow --tags
+      shell: bash
+    - name: Install Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: ${{ env.GOVERSION }}
+    - name: Install pulumictl
+      uses: jaxxstorm/action-install-gh-release@v1.5.0
+      with:
+        repo: pulumi/pulumictl
+    - name: Install Pulumi CLI
+      uses: pulumi/action-install-pulumi-cli@v2
+
+
+    # `uses:` statements do not support expressions
+    # (https://github.com/actions/runner/issues/895), so this is invalid:
+    #
+    #   ${{ github.action_path }}/lang
+    #
+    # This is a problem for nested composite actions, which are unable to specify a
+    # `uses:` relative to the main composite action.
+    #
+    # While they need to be static, they do not need to be resolved. We can work around
+    # the static requirement by specifying a local static path in downstream `uses:`, and
+    # then moving the desired action to the static path at runtime.
+    - name: Setup Language Workflows
+      run: |
+        mkdir ./.pulumi-package-publish
+        cp -r ${{ github.action_path }}/lang ./.pulumi-package-publish/lang
+      shell: bash
+
+    - name: Nodejs - Publish to NPM
+      uses: ./.pulumi-package-publish/lang/nodejs
+      if: (contains(inputs.sdk, 'nodejs') || (contains(inputs.sdk, 'all') && !contains(inputs.sdk, '!all'))) && !contains(inputs.sdk, '!nodejs')
+      with:
+        aws_access_key_id: ${{ inputs.aws_access_key_id }}
+        aws_secret_access_key: ${{ inputs.aws_secret_access_key }}
+        codeartifact_repository: ${{ inputs.codeartifact_repository }}
+        codeartifact_domain: ${{ inputs.codeartifact_domain }}
+        codeartifact_domain_owner: ${{ inputs.codeartifact_domain_owner }}
+        codeartifact_region: ${{ inputs.codeartifact_region }}
+        artifact_name: ${{ inputs.artifact_name }}
+    - name: Python - Publish to PyPi
+      if: (contains(inputs.sdk, 'python') || (contains(inputs.sdk, 'all') && !contains(inputs.sdk, '!all'))) && !contains(inputs.sdk, '!python')
+      uses: ./.pulumi-package-publish/lang/python
+      with:
+        aws_access_key_id: ${{ inputs.aws_access_key_id }}
+        aws_secret_access_key: ${{ inputs.aws_secret_access_key }}
+        codeartifact_repository: ${{ inputs.codeartifact_repository }}
+        codeartifact_domain: ${{ inputs.codeartifact_domain }}
+        codeartifact_domain_owner: ${{ inputs.codeartifact_domain_owner }}
+        codeartifact_region: ${{ inputs.codeartifact_region }}
+        artifact_name: ${{ inputs.artifact_name }}

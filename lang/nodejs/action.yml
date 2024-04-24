@@ -1,0 +1,60 @@
+name: 'Publish to NPM'
+description: 'A subcomponent of pulumi-package-publish'
+
+inputs:
+  aws_access_key_id:
+    description: 'AWS Access Key ID'
+    required: true
+  aws_secret_access_key:
+    description: 'AWS Secret Access Key'
+    required: true
+  codeartifact_repository:
+    description: 'AWS CodeArtifact Repository'
+    required: true
+  codeartifact_domain:
+    description: 'AWS CodeArtifact Domain'
+    required: true
+  codeartifact_domain_owner:
+    description: 'AWS CodeArtifact Domain Owner'
+    required: true
+  codeartifact_region:
+    description: 'AWS CodeArtifact Region'
+    required: true
+  artifact_name:
+    description: 'The name of the artifact to publish'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ env.NODEVERSION }}
+        registry-url: https://${{ inputs.codeartifact_domain }}-${{ inputs.codeartifact_domain_owner }}.d.codeartifact.${{ inputs.codeartifact_region }}.amazonaws.com/npm/${{ inputs.codeartifact_repository }}/
+    - name: Login to AWS CodeArtifact
+      env:
+        AWS_ACCESS_KEY_ID: ${{ inputs.aws_access_key_id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.aws_secret_access_key }}
+      run: aws codeartifact login
+        --tool npm
+        --repository ${{ inputs.codeartifact_repository }}
+        --domain ${{ inputs.codeartifact_domain }}
+        --domain-owner ${{ inputs.codeartifact_domain_owner }}
+        --region ${{ inputs.codeartifact_region }}
+      shell: bash
+    - name: Run npm ping
+      run: npm ping
+      shell: bash
+    - name: Download NodeJS SDK
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact_name }}
+        path: ${{ github.workspace }}/sdk/
+    - name: Uncompress NodeJS SDK
+      run: tar -zxf ${{ github.workspace }}/sdk/nodejs.tar.gz -C
+        ${{ github.workspace }}/sdk/nodejs
+      shell: bash
+    - name: Publish Node
+      run: npm publish ${{ github.workspace }}/sdk/nodejs/bin -tag latest
+      shell: bash
